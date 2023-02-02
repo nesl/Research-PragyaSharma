@@ -1,0 +1,54 @@
+17:34:03.268728 Connecting to broker test.mosquitto.org
+17:34:03.505480 log: Sending CONNECT (u0, p0, wr0, wq0, wf0, c1, k60) client_id=b'controller1'
+17:34:03.507709 log: Sending SUBSCRIBE (d0, m1) [(b'/robot/position', 0)]
+17:34:03.508041 log: Sending PUBLISH (d0, q0, r0, m2), 'b'/robot/command'', ... (23 bytes)
+17:34:03.711694 log: Received CONNACK (0, 0)
+17:34:03.711770 Connection ok
+17:34:03.911752 log: Received SUBACK
+17:34:05.961331 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:05.961503 Message received: Position command sent: 99
+17:34:07.508748 log: Sending SUBSCRIBE (d0, m3) [(b'/robot/position', 0)]
+17:34:07.508854 log: Sending PUBLISH (d0, q0, r0, m4), 'b'/robot/command'', ... (23 bytes)
+17:34:07.672350 log: Received SUBACK
+17:34:09.952432 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:09.952476 Message received: Position command sent: 98
+17:34:11.513587 log: Sending SUBSCRIBE (d0, m5) [(b'/robot/position', 0)]
+17:34:11.514158 log: Sending PUBLISH (d0, q0, r0, m6), 'b'/robot/command'', ... (23 bytes)
+17:34:11.687783 log: Received SUBACK
+17:34:14.048359 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:14.048473 Message received: Position command sent: 97
+17:34:15.519182 log: Sending SUBSCRIBE (d0, m7) [(b'/robot/position', 0)]
+17:34:15.519534 log: Sending PUBLISH (d0, q0, r0, m8), 'b'/robot/command'', ... (23 bytes)
+17:34:15.688816 log: Received SUBACK
+17:34:18.004434 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:18.004549 Message received: Position command sent: 96
+17:34:19.524379 log: Sending SUBSCRIBE (d0, m9) [(b'/robot/position', 0)]
+17:34:19.524849 log: Sending PUBLISH (d0, q0, r0, m10), 'b'/robot/command'', ... (23 bytes)
+17:34:19.695523 log: Received SUBACK
+17:34:22.035026 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:22.035158 Message received: Position command sent: 95
+17:34:23.529892 log: Sending SUBSCRIBE (d0, m11) [(b'/robot/position', 0)]
+17:34:23.530425 log: Sending PUBLISH (d0, q0, r0, m12), 'b'/robot/command'', ... (23 bytes)
+17:34:23.697730 log: Received SUBACK
+17:34:25.916447 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:25.916639 Message received: Position command sent: 94
+17:34:27.535257 log: Sending SUBSCRIBE (d0, m13) [(b'/robot/position', 0)]
+17:34:27.535581 log: Sending PUBLISH (d0, q0, r0, m14), 'b'/robot/command'', ... (23 bytes)
+17:34:27.768939 log: Received SUBACK
+17:34:29.936707 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:29.936898 Message received: Position command sent: 93
+17:34:31.536997 log: Sending SUBSCRIBE (d0, m15) [(b'/robot/position', 0)]
+17:34:31.537254 log: Sending PUBLISH (d0, q0, r0, m16), 'b'/robot/command'', ... (23 bytes)
+17:34:31.866497 log: Received SUBACK
+17:34:34.016202 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:34.016298 Message received: Position command sent: 92
+17:34:35.540723 log: Sending SUBSCRIBE (d0, m17) [(b'/robot/position', 0)]
+17:34:35.540844 log: Sending PUBLISH (d0, q0, r0, m18), 'b'/robot/command'', ... (23 bytes)
+17:34:35.975142 log: Received SUBACK
+17:34:38.021716 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:38.021810 Message received: Position command sent: 91
+17:34:39.545049 log: Sending SUBSCRIBE (d0, m19) [(b'/robot/position', 0)]
+17:34:39.545359 log: Sending PUBLISH (d0, q0, r0, m20), 'b'/robot/command'', ... (24 bytes)
+17:34:39.715351 log: Received SUBACK
+17:34:41.965412 log: Received PUBLISH (d0, q0, r0, m0), '/robot/position', ...  (25 bytes)
+17:34:41.965557 Message received: Position command sent: 90

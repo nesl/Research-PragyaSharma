@@ -1,0 +1,58 @@
+20:22:00.720787 Connecting to broker test.mosquitto.org
+20:22:01.794654 log: Sending CONNECT (u0, p0, wr0, wq0, wf0, c1, k60) client_id=b'Robot'
+[ 2.05050374e-01  1.72817797e-05  2.27803577e-06 -8.25476441e-05]20:22:14.029216 log: Sending PUBLISH (d0, q0, r0, m1), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226934.0442s
+20:22:14.044459 log: Sending SUBSCRIBE (d0, m2) [(b'/robot/command', 0)]
+20:22:14.044564 log: Received CONNACK (0, 0)
+20:22:14.044582 Connection ok
+20:22:14.452439 log: Received SUBACK
+20:22:15.274842 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (72 bytes)
+20:22:15.274918 Message received: Control command received: [0.10000227803577001, 0.7142163278513152, 0.0]
+[ 8.38771849e-01 -1.63405205e-04  2.46037005e-01 -2.66039713e-04]20:22:18.046837 log: Sending PUBLISH (d0, q0, r0, m3), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226938.0485s
+20:22:18.048528 log: Sending SUBSCRIBE (d0, m4) [(b'/robot/command', 0)]
+20:22:19.060498 log: Received SUBACK
+20:22:19.570724 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (64 bytes)
+20:22:19.570778 Message received: Control command received: [0.346037005, 0.3283392526539506, 0.0]
+[ 2.17698492e+00 -6.22805920e-04  4.01193766e-01 -3.67709045e-04]20:22:22.051564 log: Sending PUBLISH (d0, q0, r0, m5), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226942.0530s
+20:22:22.053134 log: Sending SUBSCRIBE (d0, m6) [(b'/robot/command', 0)]
+20:22:24.589528 log: Received SUBACK
+20:22:25.916822 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (65 bytes)
+20:22:25.916866 Message received: Control command received: [0.501193766, 0.11968128360508734, 0.0]
+[ 3.78388638e+00 -1.46495503e-03  4.62975853e-01 -6.71778340e-04]20:22:26.054808 log: Sending PUBLISH (d0, q0, r0, m7), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226946.0578s
+20:22:26.057860 log: Sending SUBSCRIBE (d0, m8) [(b'/robot/command', 0)]
+20:22:27.837433 log: Received SUBACK
+20:22:28.078694 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (65 bytes)
+20:22:28.078747 Message received: Control command received: [0.562975853, 0.02281285239519818, 0.0]
+[ 5.89707881e+00 -3.54215050e-03  5.47362972e-01 -1.18360599e-03]20:22:30.061738 log: Sending PUBLISH (d0, q0, r0, m9), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226950.0624s
+20:22:30.062420 log: Sending SUBSCRIBE (d0, m10) [(b'/robot/command', 0)]
+20:22:31.333160 log: Received SUBACK
+20:22:32.157831 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (72 bytes)
+20:22:32.157886 Message received: Control command received: [0.6473629719999999, -0.0748851239502968, 0.0]
+[ 8.18595975e+00 -7.08046265e-03  5.99330802e-01 -1.62070697e-03]20:22:34.072928 log: Sending PUBLISH (d0, q0, r0, m11), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226954.0834s
+20:22:34.083449 log: Sending SUBSCRIBE (d0, m12) [(b'/robot/command', 0)]
+20:22:34.523022 log: Received SUBACK
+20:22:35.247159 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (66 bytes)
+20:22:35.247199 Message received: Control command received: [0.699330802, -0.15652115498799923, 0.0]
+[ 1.07299529e+01 -1.18348591e-02  6.44875989e-01 -1.57797282e-03]20:22:38.086931 log: Sending PUBLISH (d0, q0, r0, m13), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226958.0880s
+20:22:38.088100 log: Sending SUBSCRIBE (d0, m14) [(b'/robot/command', 0)]
+20:22:38.516599 log: Received SUBACK
+20:22:39.232122 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (66 bytes)
+20:22:39.232171 Message received: Control command received: [0.744875989, -0.22795489032158398, 0.0]
+[ 1.34211544e+01 -1.75600830e-02  6.83530852e-01 -2.52436616e-03]20:22:42.090879 log: Sending PUBLISH (d0, q0, r0, m15), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226962.0923s
+20:22:42.092386 log: Sending SUBSCRIBE (d0, m16) [(b'/robot/command', 0)]
+20:22:42.509703 log: Received SUBACK
+20:22:43.226817 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (72 bytes)
+20:22:43.226952 Message received: Control command received: [0.7835308519999999, -0.2885817441908498, 0.0]
+[ 1.62263974e+01 -2.64356238e-02  7.07252028e-01 -3.49469145e-03]20:22:46.094979 log: Sending PUBLISH (d0, q0, r0, m17), 'b'/robot/state'', ... (65 bytes)
+CVXPY Optimization Time: 1668226966.0965s
+20:22:46.096695 log: Sending SUBSCRIBE (d0, m18) [(b'/robot/command', 0)]
+20:22:46.603715 log: Received SUBACK
+20:22:47.330758 log: Received PUBLISH (d0, q0, r0, m0), '/robot/command', ...  (66 bytes)
+20:22:47.330815 Message received: Control command received: [0.807252028, -0.32578637761643775, 0.0]
