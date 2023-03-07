@@ -26,20 +26,6 @@ action[0] = P.MAX_ACC / 2  # a
 action[1] = 0.0  # delta
 # print("Initial action: ", action)
 
-
-# Interpolated Path to follow given waypoints
-path = compute_path_from_wp(
-    [0, 6, 28, 28.5, 25, 26],
-    [0, 7.5, -5.5, 0.8, 1.8, 6.8],
-    P.path_tick,
-)
-
-# path = compute_path_from_wp(
-#     [-3, -3, -5, -3, 2, 2, 4, 6, 6, 8, 8, 4, 4, 0, -2, -4, -6, -6],
-#     [0, -2, -6, -7, -7, -2, -2, 0, 3, 5, 10, 10, 7, 7, 9, 9, 5, 2],
-#     P.path_tick,
-# )
-
 # Cost Matrices
 Q = np.diag([20, 20, 10, 20])  # state error cost
 # Qf = np.diag([30, 30, 30, 30])  # state final error cost
@@ -47,13 +33,6 @@ R = np.diag([10, 10])  # input cost
 # R_ = np.diag([10, 10])  # input rate of change cost
 
 mpc = mpcpy.MPC(P.N, P.M, Q, R)
-x_history = []
-y_history = []
-
-
-# Uncomment write commands to save data on file
-# with open("output.txt", 'w') as f:
-#     sys.stdout = f
 
 
 def on_log(client, userdata, level, buf):
@@ -71,6 +50,34 @@ def on_connect(client, userdata, flags, rc):
         # f.write(str(now.time()))
         # f.write(" Bad connection, exited with code "+str(rc)+'\n')
 
+def get_path_from_num(path_num):
+    if path_num == 1:
+        path = compute_path_from_wp(
+            [0, 6, 28, 28.5, 25, 26],
+            [0, 7.5, -5.5, 0.8, 1.8, 6.8],
+            P.path_tick,)
+    elif path_num == 2:
+        path = compute_path_from_wp(
+            [0, 2, 4, 8, 12, 20],
+            [0, 2.5, -2.5, 2.5, -1.8, 3.8],
+            P.path_tick,)
+    elif path_num == 3:
+        path = compute_path_from_wp(
+            [0, 1, -3, -5, -3, 2, 2, 4, 6, 6, 8, 8, 4, 4, 0, -2, -4, -6, -6],
+            [0, 3, -2, -6, -7, -7, -2, -2, 0, 3, 5, 10, 10, 7, 7, 9, 9, 5, 2],
+            P.path_tick,)
+    elif path_num == 4:
+        path = compute_path_from_wp(
+            [0, 3, 4, 6, 10, 11, 12, 6, 1, 0],
+            [0, 0, 2, 4, 3, 3, -1, -6, -2, -2],
+            P.path_tick,)
+    elif path_num == 5:
+        path = compute_path_from_wp(
+            [0, 2, 3, 5, 6, 8, 8, 10, 8, 8, 6, 5, 3, 2, 0],
+            [0, -2, -2, -4, -4, -2, -1, 0, 1, 2, 4, 4, 2, 2, 4],
+            P.path_tick,)
+    return path
+
 def on_message(client, userdata, msg):
     topic = msg.topic
     msg_decode = str(msg.payload.decode("utf-8"))
@@ -83,7 +90,7 @@ def on_message(client, userdata, msg):
     except:
         msg_decode = msg_decode.split("[")[1].split("]")[0]
     temp_state = list(msg_decode.split(" "))
-    rx_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+    rx_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     # print(temp_state)
     temp_state = list(filter(lambda a: a!= '', temp_state))
     # print(temp_state)
@@ -92,6 +99,7 @@ def on_message(client, userdata, msg):
     rx_state[2] = float(temp_state[2])
     rx_state[3] = float(temp_state[3])
     rx_state[4] = float(temp_state[4])
+    rx_state[5] = float(temp_state[5])
     # print("State 0 ", str(rx_state[0]))
     # print("State 1 ", str(rx_state[1]))
     # print("State 2 ", str(rx_state[2]))
@@ -101,11 +109,11 @@ def on_message(client, userdata, msg):
     print("State info received at cloud: ", state)
     # print("Rxvd State Seq No: ", str(rx_state[4]))
     state_sq_no = rx_state[4]
+    path_num = int(rx_state[5])
+    print("Rxvd Path No: ", str(path_num))
 
+    path = get_path_from_num(path_num)
     # time.sleep(0.5)
-
-    x_history.append(state[0])
-    y_history.append(state[1])
 
     # for MPC car ref frame is used
     new_state = np.copy(state)
@@ -148,24 +156,12 @@ def on_message(client, userdata, msg):
     action[:] = [u_mpc.value[0, 1], u_mpc.value[1, 1]]
     print("action: ", action)
 
-    elapsed = time.time() - start
-    # print("CVXPY Optimization Time: {:.4f}s".format(elapsed))
-
     global ctrl_cmd
     global old_cmd
     global cmd_sq_no
     old_cmd = ctrl_cmd
     ctrl_cmd = [new_state[2], action[0], action[1], state_sq_no]
     # print("Control command generated: "+str(ctrl_cmd))
-
-    # client.loop_start()
-    # client.publish("/robot/command", "Control command received: "+str(ctrl_cmd))
-
-
-    # def on_disconnect(client, userdata, flags, rc=0):
-    #     now = datetime.datetime.now()
-    #     f.write(str(now.time()))
-    #     f.write(" Disconnection with code "+str(rc))+'\n'
 
 
 # Send command to MQTT
@@ -177,14 +173,10 @@ client = mqtt.Client("Cloud Controller")
 client.on_connect = on_connect
 client.on_log = on_log
 client.on_message = on_message
-# client.on_disconnect = on_disconnect
-
-now = datetime.datetime.now()
-# f.write(str(now.time()))
-# f.write(" Connecting to broker "+broker+'\n')
 
 client.connect(broker)
 client.loop_start()
+
 while True:
     
     client.subscribe("/robot/state")
@@ -192,16 +184,10 @@ while True:
     # make sure new command diff than last one
     # print("Old command: "+str(old_cmd))
     if any(ctrl_cmd) and old_cmd!=ctrl_cmd:
-        client.publish("/robot/command", str(ctrl_cmd))
+        client.publish("/robot/command", str(ctrl_cmd),2)
         print("Control command sent: "+str(ctrl_cmd)+'\n')
         cmd_sq_no = cmd_sq_no+1
         old_cmd = ctrl_cmd #do not publish same command again!
     
-    time.sleep(0.05)
-    # f.flush()
-
-        # client.loop_stop()
-        # client.disconnect()
-        
-        # f.close()
+    time.sleep(0.01)
 
