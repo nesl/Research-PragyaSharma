@@ -36,7 +36,8 @@ x_history = []
 y_history = []
 global cld_cmd_lat
 cld_cmd_lat = []
-
+global trans_path
+trans_path = []
 
 def get_state(robotId):
     """ """
@@ -140,6 +141,7 @@ def on_message(client, userdata, msg):
     # f.write(str(now.time()))
     print("Message received: "+msg_decode)
 
+
     msg_decode = msg_decode.split("[")[1].split("]")[0]
     temp_state = list(msg_decode.split(","))
     temp_state[0]=float(temp_state[0])
@@ -151,9 +153,23 @@ def on_message(client, userdata, msg):
     global cld_cmd_lat
     latency = last_cmd_time-last_state_time
     print("Message received latency: ", latency)
+    if latency>10000:
+        return
     cld_cmd_lat.append(latency)
 
     set_ctrl(car, state[0], state[1], state[2], state[3])
+
+def transform_path(path):
+    idx = 0
+    trans_path = []
+    while idx < len(path[0]):
+        curr_coord = []
+        curr_coord.append(path[0][idx])
+        curr_coord.append(path[1][idx])
+        trans_path.append(curr_coord)
+        idx = idx+1
+    # print(trans_path)
+    return trans_path
 
 def check_path_num(path_var):
     global path_num
@@ -303,20 +319,71 @@ def env_setup(path_var):
         P.path_tick,
     )
 
+    global trans_path
+    trans_path = transform_path(path)
+    # print(trans_path)
+
     for x_, y_ in zip(path[0, :], path[1, :]):
         p.addUserDebugLine([x_, y_, 0], [x_, y_, 0.33], [0, 0, 1])
 
-    return path
+    return trans_path, path
 
 def timer_expired (last_state_time, timeout):
     now = time.time()
-    if now-last_state_time >= 0.5:
+    # print("Current_latency = ",now-last_state_time)
+    if now-last_state_time >= timeout:
         print("Timer Expired!!")
         return True
     else:
         return False
 
-broker = "127.0.0.1"
+def get_distance(x1, y1, x2, y2):
+	return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+def find_nearest_goal(trans_path, x_pos, y_pos):
+    waypoint_lst = [tuple(x) for x in trans_path]
+    waypoint_lst = np.array(waypoint_lst)
+    target = np.array((x_pos, y_pos))
+    dist = np.linalg.norm(waypoint_lst-target, axis=1)
+    min_idx = np.argmin(dist)
+    goal_pt = waypoint_lst[min_idx]
+    # print(type(goal_pt))
+    return goal_pt
+
+def calc_accuracy(trans_path,  x_history, y_history):
+    idx=0
+    err_array = np.zeros(len(x_history))
+    print("length", len(x_history))
+    while idx!=len(x_history):
+        # print("idx", idx)
+        target_waypt = find_nearest_goal(trans_path, x_history[idx], y_history[idx])
+        err = get_distance(target_waypt[0], target_waypt[1], x_history[idx], y_history[idx])
+        if err==0:
+            err_array[idx] = 1
+        elif err>0 or err<0.1:
+            err_array[idx] = 0.9
+        elif err>=0.1 or err<0.2:
+            err_array[idx] = 0.8
+        elif err>=0.2 or err<0.3:
+            err_array[idx] = 0.7
+        elif err>=0.3 or err<0.4:
+            err_array[idx] = 0.6
+        elif err>=0.4 or err<0.5:
+            err_array[idx] = 0.5
+        elif err>=0.5 or err<0.6:
+            err_array[idx] = 0.4
+        elif err>=0.6 or err<0.7:
+            err_array[idx] = 0.3
+        elif err>=0.7 or err<0.8:
+            err_array[idx] = 0.2
+        elif err>=0.8 or err<0.9:
+            err_array[idx] = 0.1
+        elif err>=0.9:
+            err_array[idx] = 0
+        idx = idx+1
+    return np.average(err_array)*100
+
+broker = "35.161.133.195"
 
 client = mqtt.Client("Robot")
 
@@ -331,20 +398,21 @@ client.loop_start()
 
 def reset_sim(path_var, timeout):
     global last_state_time, counter, sim_start_time, cld_cmd_lat
-    global x_history, y_history, curr_state, state_sq_no
+    global x_history, y_history, curr_state, state_sq_no, trans_path
 
     last_state_time = 0
     counter = 0
     x_history = []
     y_history = []
     cld_cmd_lat = []
+    trans_path = []
     curr_state = state_rxvd
     state_sq_no = 1
     # Get simulation start time
     sim_start_time = time.time()
 
-    rxvd_lat, timeout_cnt, state_sq_no = start_sim(path_var, timeout)
-    return cld_cmd_lat, rxvd_lat, timeout_cnt, state_sq_no
+    acc, rxvd_lat, timeout_cnt, state_sq_no = start_sim(path_var, timeout)
+    return acc, cld_cmd_lat, rxvd_lat, timeout_cnt, state_sq_no
 
 def start_sim(path_var, timeout):
 
@@ -352,7 +420,7 @@ def start_sim(path_var, timeout):
 
     # Process path variable from str to list
     path_var = ast.literal_eval(path_var)
-    path = env_setup(path_var)
+    trans_path, path = env_setup(path_var)
 
     timeout_cnt = 0
     state = get_state(car)
@@ -378,8 +446,9 @@ def start_sim(path_var, timeout):
             # send new state
             state = get_state(car)
             print("Sent new state",str(state))
-            client.publish("/robot/state", str(state), 2)
+            client.publish("/robot/state", str(state),2)
             last_state_time = time.time()
+            # print(last_state_time)
             state_sq_no = state_sq_no + 1
             if state_sq_no >= 2000:
                 print("Failed! Car in bad state")
@@ -388,7 +457,8 @@ def start_sim(path_var, timeout):
                 plot_results(path, x_history, y_history, timeout)
                 p.disconnect()
                 time_taken = None
-                return time_taken, timeout_cnt, state_sq_no
+                accuracy = None
+                return accuracy, time_taken, timeout_cnt, state_sq_no
             curr_state = state_txd
             print("State machine at: ", curr_state)
             print('\n')
@@ -421,8 +491,10 @@ def start_sim(path_var, timeout):
             print("Total time: ", time_taken)
 
             plot_results(path, x_history, y_history, timeout)
+            accuracy = calc_accuracy(trans_path, x_history, y_history)
+            print("Accuracy: ", accuracy)
             p.disconnect()
-            return time_taken, timeout_cnt, state_sq_no
+            return accuracy, time_taken, timeout_cnt, state_sq_no
 
 if __name__ == "__main__":
     path = str(sys.argv[1])

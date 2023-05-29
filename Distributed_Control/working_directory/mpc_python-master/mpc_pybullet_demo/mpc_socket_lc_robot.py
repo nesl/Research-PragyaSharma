@@ -37,12 +37,14 @@ x_history = []
 y_history = []
 global cld_cmd_lat
 cld_cmd_lat = []
+global trans_path
+trans_path = []
 
 HEADER = 64
-PORT = 5058
+PORT = 5060
 FORMAT = 'utf-8'
 DISCONNECT_MESSAGE = "!DISCONNECT"
-SERVER = "54.241.142.188"#13.52.247.117"
+SERVER = "54.183.0.212"
 ADDR = (SERVER, PORT)
 
 def get_state(robotId):
@@ -60,7 +62,6 @@ def get_state(robotId):
             path_num,
         ]
     )
-
 
 def set_ctrl(robotId, currVel, acceleration, steeringAngle, cmd_sq_no):
 
@@ -100,7 +101,6 @@ def set_ctrl(robotId, currVel, acceleration, steeringAngle, cmd_sq_no):
 
     print("Rx cmd sq no: ", str(cmd_sq_no))
 
-
 def plot_results(path, x_history, y_history, timeout):
     """ """
     plt.style.use("ggplot")
@@ -135,13 +135,8 @@ def send(client, msg):
     send_length += b' ' * (HEADER - len(send_length))
     client.send(send_length)
     client.send(message)
-    global last_state_time
-    last_state_time = time.time()
 
-    global state_sq_no
-    state_sq_no = state_sq_no+1
-    
-    # time.sleep(0.5)
+def recv(client):
     msg_decode = client.recv(2048).decode(FORMAT)
     global last_cmd_time
     last_cmd_time = time.time()
@@ -157,11 +152,26 @@ def send(client, msg):
     temp_state[3] = float(temp_state[3])
     state = np.asarray(temp_state)
 
-    global cld_cmd_lat
+    global cld_cmd_lat, last_state_time
     latency = last_cmd_time-last_state_time
+    print("Message received latency: ", latency)
+    if latency>10000:
+        return
     cld_cmd_lat.append(latency)
 
     set_ctrl(car, state[0], state[1], state[2], state[3])
+
+def transform_path(path):
+    idx = 0
+    trans_path = []
+    while idx < len(path[0]):
+        curr_coord = []
+        curr_coord.append(path[0][idx])
+        curr_coord.append(path[1][idx])
+        trans_path.append(curr_coord)
+        idx = idx+1
+    # print(trans_path)
+    return trans_path
 
 def check_path_num(path_var):
     global path_num
@@ -311,23 +321,61 @@ def env_setup(path_var):
         P.path_tick,
     )
 
+    global trans_path
+    trans_path = transform_path(path)
+    print(trans_path)
+
     for x_, y_ in zip(path[0, :], path[1, :]):
         p.addUserDebugLine([x_, y_, 0], [x_, y_, 0.33], [0, 0, 1])
 
-    return path
+    return trans_path, path
 
 def timer_expired (last_state_time, timeout):
     now = time.time()
+    print("Timer status: ", now-last_state_time)
     if now-last_state_time >= timeout:
         print("Timer Expired!!")
         return True
     else:
         return False
 
+def get_distance(x1, y1, x2, y2):
+	return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+def find_nearest_goal(trans_path, x_pos, y_pos):
+    waypoint_lst = [tuple(x) for x in trans_path]
+    waypoint_lst = np.array(waypoint_lst)
+    target = np.array((x_pos, y_pos))
+    dist = np.linalg.norm(waypoint_lst-target, axis=1)
+    min_idx = np.argmin(dist)
+    goal_pt = waypoint_lst[min_idx]
+    # print(type(goal_pt))
+    return goal_pt
+
+def calc_accuracy(path,  x_history, y_history):
+    idx=0
+    err_bound = 1
+    err_array = np.zeros(len(x_history))
+    trans_path = transform_path(path)
+    print(len(trans_path))
+    print(len(x_history))
+    # print(trans_path)
+    
+    while idx!=len(x_history)-1:
+        print("idx:", idx)
+        target_waypt = find_nearest_goal(trans_path, x_history[idx], y_history[idx])
+        err = get_distance(target_waypt[0], target_waypt[1], x_history[idx], y_history[idx])
+        print(target_waypt[0], target_waypt[1], x_history[idx], y_history[idx], err)
+        if err>err_bound:
+            err = err_bound
+        err_array[idx] = ((err_bound - err)/err_bound)*100
+        print(err_array[idx])
+        print("average = ", np.average(err_array))
+        idx = idx+1
+    return np.average(err_array)
+
 def have_reached(state, path, timeout):
     global sim_start_time
-    x_history.append(state[0])
-    y_history.append(state[1])
 
     if np.sqrt((state[0] - path[0, -1]) ** 2 + (state[1] - path[1, -1]) ** 2) < 0.2:
         print("Success! Goal Reached")
@@ -342,37 +390,42 @@ def have_reached(state, path, timeout):
         print("Total time: ", time_taken)
 
         plot_results(path, x_history, y_history, timeout)
+        accuracy = calc_accuracy(path, x_history, y_history)
+        print("Accuracy: ", accuracy)
         p.disconnect()
-        return time_taken
+        return accuracy, time_taken
+    else:
+        return None, None
 
 global client
 client = connect()
 
 def reset_sim(path_var, timeout):
     global last_state_time, counter, sim_start_time, cld_cmd_lat
-    global x_history, y_history, curr_state, state_sq_no
+    global x_history, y_history, curr_state, state_sq_no, trans_path
 
     last_state_time = 0
     counter = 0
     x_history = []
     y_history = []
     cld_cmd_lat = []
+    trans_path = []
     curr_state = state_rxvd
     state_sq_no = 1
     # Get simulation start time
     sim_start_time = time.time()
 
-    rxvd_lat, timeout_cnt, state_sq_no = start_sim(path_var, timeout)
-    return cld_cmd_lat, rxvd_lat, timeout_cnt, state_sq_no
-
+    acc, rxvd_lat, timeout_cnt, state_sq_no = start_sim(path_var, timeout)
+    return acc, cld_cmd_lat, rxvd_lat, timeout_cnt, state_sq_no
 
 def start_sim(path_var, timeout):
 
     global last_state_time, curr_state, state_sq_no, sim_start_time
+    global x_history, y_history
 
     # Process path variable from str to list
     path_var = ast.literal_eval(path_var)
-    path = env_setup(path_var)
+    tarns_path, path = env_setup(path_var)
 
     timeout_cnt = 0
     state = get_state(car)
@@ -381,12 +434,48 @@ def start_sim(path_var, timeout):
 
     while True:
         # f.flush()
-        state = get_state(car)
-        time_taken = have_reached(state, path, timeout)
-        if time_taken!=None:
-            return time_taken, timeout_cnt, state_sq_no
-        send(client, str(state))
-        print("Sent new state",str(state))
+        if curr_state == state_txd and timer_expired(last_state_time, timeout):
+            print(f"Timeout: {timeout}; halting car")
+            set_ctrl(car, 0, 0, 0, 9999) # Halt car
+            # last_state_time = time.time()
+            timeout_cnt = timeout_cnt+1
+            curr_state = state_timeout
+        elif curr_state == state_timeout:
+            print("State machine at: ", curr_state)
+            # Resend new state after 100ms
+            # time.sleep(0.08)
+            curr_state = state_rxvd
+        elif curr_state == state_rxvd:
+            # time.sleep(1)
+            print("State machine at: ", curr_state)
+            # send new state
+            state = get_state(car)
+            print("Sent new state",str(state))
+            send(client, str(state))
+            last_state_time = time.time()
+            # print(last_state_time)
+            state_sq_no = state_sq_no + 1
+            if state_sq_no >= 2000:
+                print("Failed! Car in bad state")
+                set_ctrl(car, 0, 0, 0, 9999)
+                curr_state = "end_sim"
+                plot_results(path, x_history, y_history, timeout)
+                p.disconnect()
+                time_taken = None
+                acc = None
+                return acc, time_taken, timeout_cnt, state_sq_no
+            curr_state = state_txd
+            print("State machine at: ", curr_state)
+            print('\n')
+        elif curr_state == state_txd:
+            recv(client)
+            global counter
+            counter = counter+1
+            if counter % 10 == 0:
+                print("State machine at: ", curr_state)
+            # wait for new cmd to arrive
+            # time.sleep(3.5)
+
         # time.sleep(3)
 
         # track path in bullet
@@ -394,6 +483,13 @@ def start_sim(path_var, timeout):
             [state[0], state[1], 0], [state[0], state[1], 0.5], [1, 0, 0]
         )
 
+        x_history.append(state[0])
+        y_history.append(state[1])
+
+        acc, time_taken = have_reached(state, path, timeout)
+        if time_taken!=None and acc!=None:
+            return acc, time_taken, timeout_cnt, state_sq_no
+        
 if __name__ == "__main__":
     path = str(sys.argv[1])
     timeout = float(sys.argv[2])

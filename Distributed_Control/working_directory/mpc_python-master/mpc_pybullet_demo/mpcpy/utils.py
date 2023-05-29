@@ -74,8 +74,11 @@ def get_ref_trajectory(state, path, target_v, dl=0.1):
     xref = np.zeros((P.N, P.T + 1))
     dref = np.zeros((1, P.T + 1))
     # sp = np.ones((1,T +1))*target_v #speed profile
+    # print("Path", path)
     ncourse = path.shape[1]
+    # print("Ncourse", ncourse)
     ind = get_nn_idx(state, path)
+    # print("ind", ind)
     dx = path[0, ind] - state[0]
     dy = path[1, ind] - state[1]
     xref[0, 0] = dx * np.cos(-state[3]) - dy * np.sin(-state[3])  # X

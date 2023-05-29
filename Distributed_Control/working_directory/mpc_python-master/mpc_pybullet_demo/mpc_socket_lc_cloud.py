@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg import norm
 import matplotlib.pyplot as plt
 from matplotlib import animation
 
@@ -16,9 +17,14 @@ import pybullet as p
 import socket 
 import threading
 
+from rrt_path_planning import rrt_path_planner as rrt
+from rrt_path_planning import PathSmoothing as ps
+
+rrt_params = rrt.RRT_Params()
+
 HEADER = 64
-PORT = 8085
-SERVER = "127.0.1.1" #socket.gethostbyname(socket.gethostname())
+PORT = 5060
+SERVER = socket.gethostbyname(socket.gethostname())
 ADDR = (SERVER, PORT)
 FORMAT = 'utf-8'
 DISCONNECT_MESSAGE = "!DISCONNECT"
@@ -38,20 +44,6 @@ action[0] = P.MAX_ACC / 2  # a
 action[1] = 0.0  # delta
 # print("Initial action: ", action)
 
-
-# Interpolated Path to follow given waypoints
-path = compute_path_from_wp(
-    [0, 6, 28, 28.5, 25, 26],
-    [0, 7.5, -5.5, 0.8, 1.8, 6.8],
-    P.path_tick,
-)
-
-# path = compute_path_from_wp(
-#     [-3, -3, -5, -3, 2, 2, 4, 6, 6, 8, 8, 4, 4, 0, -2, -4, -6, -6],
-#     [0, -2, -6, -7, -7, -2, -2, 0, 3, 5, 10, 10, 7, 7, 9, 9, 5, 2],
-#     P.path_tick,
-# )
-
 # Cost Matrices
 Q = np.diag([20, 20, 10, 20])  # state error cost
 # Qf = np.diag([30, 30, 30, 30])  # state final error cost
@@ -59,10 +51,66 @@ R = np.diag([10, 10])  # input cost
 # R_ = np.diag([10, 10])  # input rate of change cost
 
 mpc = mpcpy.MPC(P.N, P.M, Q, R)
-x_history = []
-y_history = []
 
+def transform_path(path):
+    idx = 0
+    trans_path = []
+    while idx < len(path[0]):
+        curr_coord = []
+        curr_coord.append(path[0][idx])
+        curr_coord.append(path[1][idx])
+        trans_path.append(curr_coord)
+        idx = idx+1
+    # print(trans_path)
+    return trans_path
 
+def get_path_from_num(path_num):
+    if path_num == 1:
+        path = compute_path_from_wp(
+            [0, 6, 28, 28.5, 25, 26],
+            [0, 7.5, -5.5, 0.8, 1.8, 6.8],
+            P.path_tick,)
+    elif path_num == 2:
+        path = compute_path_from_wp(
+            [0, 2, 4, 8, 12, 20],
+            [0, 2.5, -2.5, 2.5, -1.8, 3.8],
+            P.path_tick,)
+    elif path_num == 3:
+        path = compute_path_from_wp(
+            [0, 1, -3, -5, -3, 2, 2, 4, 6, 6, 8, 8, 4, 4, 0, -2, -4, -6, -6],
+            [0, 3, -2, -6, -7, -7, -2, -2, 0, 3, 5, 10, 10, 7, 7, 9, 9, 5, 2],
+            P.path_tick,)
+    elif path_num == 4:
+        path = compute_path_from_wp(
+            [0, 3, 4, 6, 10, 11, 12, 6, 1, 0],
+            [0, 0, 2, 4, 3, 3, -1, -6, -2, -2],
+            P.path_tick,)
+    elif path_num == 5:
+        path = compute_path_from_wp(
+            [0, 2, 3, 5, 6, 8, 8, 10, 8, 8, 6, 5, 3, 2, 0],
+            [0, -2, -2, -4, -4, -2, -1, 0, 1, 2, 4, 4, 2, 2, 4],
+            P.path_tick,)
+    trans_path = transform_path(path)
+    return path, trans_path
+
+def get_obs_location():
+    loc1= [3, 0, 0]
+    loc2 = [4, -1.5, 0]
+    return loc1, loc2
+
+def get_distance(x1, y1, x2, y2):
+	return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+#TODO: Update to handle past waypoints
+def find_nearest_goal(trans_path, x_pos, y_pos):
+    waypoint_lst = [tuple(x) for x in trans_path]
+    waypoint_lst = np.array(waypoint_lst)
+    target = np.array((x_pos, y_pos))
+    dist = np.linalg.norm(waypoint_lst-target, axis=1)
+    min_idx = np.argmin(dist)
+    goal_pt = waypoint_lst[min_idx]
+    # print(type(goal_pt))
+    return goal_pt
 
 def process_message(msg):
     msg_decode = msg #str(msg.payload.decode("utf-8"))
@@ -75,24 +123,53 @@ def process_message(msg):
     except:
         msg_decode = msg_decode.split("[")[1].split("]")[0]
     temp_state = list(msg_decode.split(" "))
-    rx_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
+    rx_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     # print(temp_state)
     temp_state = list(filter(lambda a: a!= '', temp_state))
-    print(temp_state)
+    # print(temp_state)
     rx_state[0] = float(temp_state[0])
     rx_state[1] = float(temp_state[1])
     rx_state[2] = float(temp_state[2])
     rx_state[3] = float(temp_state[3])
     rx_state[4] = float(temp_state[4])
+    rx_state[5] = float(temp_state[5])
     state = np.asarray(rx_state[0:4])
     print("State info received at cloud: ", state)
     # print("Rxvd State Seq No: ", str(rx_state[4]))
     state_sq_no = rx_state[4]
+    path_num = int(rx_state[5])
+    print("Rxvd Path No: ", str(path_num))
 
+    path, trans_path = get_path_from_num(path_num)
     # time.sleep(0.5)
 
-    x_history.append(state[0])
-    y_history.append(state[1])
+    loc1, loc2 = get_obs_location()
+    obs = [np.array(loc1), np.array(loc2)]
+
+    if get_distance(loc1[0], loc1[1], rx_state[0], rx_state[1])<0.5:
+        
+        # Create new waypoints, invoke RRT
+
+        xy_start = np.array([rx_state[0], rx_state[1]])
+        xy_goal =  np.array(find_nearest_goal(trans_path, rx_state[0], rx_state[1])) # Get next to next waypoint
+
+        P = rrt.rrt_path(obs, xy_start, xy_goal, rrt_params)
+        P_smooth = ps.SmoothPath(P, obs, smoothiters=100)
+
+        traj = np.array([P_smooth[0]])
+        for i in range(len(P_smooth)-1):
+            A = P_smooth[i]
+            B = P_smooth[i+1]
+            traj = np.vstack([traj, A])
+            
+            n = (B-A) / norm(B-A)
+            delta = n * P.DT
+            N = int( norm(B-A) / norm(delta))
+            sp = A
+            for i in range(N):
+                sp += delta
+                traj = np.vstack([traj, sp])
+            traj = np.vstack([traj, B])
 
     # for MPC car ref frame is used
     new_state = np.copy(state)
@@ -114,14 +191,12 @@ def process_message(msg):
     new_state[2] = new_state[2] + action[0] * P.DT
     new_state[3] = new_state[3] + action[0] * np.tan(action[1]) / P.L * P.DT
 
-    # optimization loop
-    start = time.time()
 
     # State Matrices
     A, B, C = mpcpy.get_linear_model_matrices(new_state, action)
 
     # Get Reference_traj -> inputs are in worldframe
-    target, _ = mpcpy.get_ref_trajectory(state, path, 1.0)
+    target, _ = mpcpy.get_ref_trajectory(state, traj, 1.0)
 
     x_mpc, u_mpc = mpc.optimize_linearized_model(
         A, B, C, new_state, target, time_horizon=P.T, verbose=False
@@ -132,8 +207,6 @@ def process_message(msg):
 
     action[:] = [u_mpc.value[0, 1], u_mpc.value[1, 1]]
 
-    elapsed = time.time() - start
-    # print("CVXPY Optimization Time: {:.4f}s".format(elapsed))
 
     global ctrl_cmd
     global old_cmd
@@ -141,12 +214,6 @@ def process_message(msg):
     ctrl_cmd = [new_state[2], action[0], action[1], state_sq_no]
     print("Control command generated: "+str(ctrl_cmd))
 
-    # if P.DT - elapsed > 0:
-    #     time.sleep(P.DT - elapsed)
-
-now = datetime.datetime.now()
-# f.write(str(now.time()))
-# f.write(" Connecting to broker "+broker+'\n')
 
 def handle_client(conn, addr):
     print(f"[NEW CONNECTION] {addr} connected.")
@@ -160,7 +227,7 @@ def handle_client(conn, addr):
             if msg == DISCONNECT_MESSAGE:
                 connected = False
 
-            print(msg)
+            # print(msg)
             process_message(msg)
 
             conn.send(str(ctrl_cmd).encode(FORMAT))
