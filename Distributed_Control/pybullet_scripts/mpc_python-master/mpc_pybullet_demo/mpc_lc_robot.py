@@ -15,6 +15,11 @@ import sys
 import paho.mqtt.client as mqtt
 import datetime
 
+global curr_x, curr_y, reached_flag
+curr_x = 0
+curr_y = 0
+reached_flag = 1
+
 def get_state(robotId):
     """ """
     robPos, robOrn = p.getBasePositionAndOrientation(robotId)
@@ -28,6 +33,37 @@ def get_state(robotId):
             p.getEulerFromQuaternion(robOrn)[2],
         ]
     )
+
+def pos_check(robotId):
+
+    steering = [0, 2]
+    wheels = [8, 15]
+
+    while True:
+        state = get_state(robotId)
+        if np.sqrt((state[0] - path[0, curr_x]) ** 2 + (state[1] - path[1, curr_y]) ** 2) < 0.2:
+            print("Reached ref position curr_x: "+str(curr_x)+", curr_y: "+str(curr_y))
+            curr_x = curr_x+1
+            curr_y = curr_y+1
+            reached_flag = 1
+
+            # Halt car
+            for wheel in wheels:
+                p.setJointMotorControl2(
+                    robotId,
+                    wheel,
+                    p.VELOCITY_CONTROL,
+                    targetVelocity=0,
+                    force=100,
+                )
+
+            for steer in steering:
+                p.setJointMotorControl2(
+                    robotId, steer, p.POSITION_CONTROL, targetPosition=0
+                )
+
+        elif np.sqrt((state[0] - path[0, curr_x]) ** 2 + (state[1] - path[1, curr_y]) ** 2) > 0.2:
+            print("Going to ref position curr_x: "+str(curr_x)+", curr_y: "+str(curr_y))
 
 
 def set_ctrl(robotId, currVel, acceleration, steeringAngle):
@@ -49,7 +85,7 @@ def set_ctrl(robotId, currVel, acceleration, steeringAngle):
             robotId,
             wheel,
             p.VELOCITY_CONTROL,
-            targetVelocity=targetVelocity*10, #/ gearRatio,
+            targetVelocity=targetVelocity*0.5/gearRatio,
             force=100,
         )
 
@@ -58,6 +94,7 @@ def set_ctrl(robotId, currVel, acceleration, steeringAngle):
             robotId, steer, p.POSITION_CONTROL, targetPosition=steeringAngle
         )
 
+    # pos_check(robotId)
 
 def plot_results(path, x_history, y_history):
     """ """
@@ -302,14 +339,17 @@ time.sleep(0.5)
 client.loop_start()
 while True:
     # f.flush()
-    state = get_state(car)
-    print("Sent new state",str(state))
+    
+    if reached_flag == 1:
+        # send new state
+        state = get_state(car)
+        print("Sent new state",str(state))
 
-    client.publish("/robot/state", str(state))
-
-    time.sleep(5)
+        client.publish("/robot/state", str(state))
+        # reached_flag = 0
 
     client.subscribe("/robot/command")
+    time.sleep(2)
 
     # track path in bullet
     p.addUserDebugLine(

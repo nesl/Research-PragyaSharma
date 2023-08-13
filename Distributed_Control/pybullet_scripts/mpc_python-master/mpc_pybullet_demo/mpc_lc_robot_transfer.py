@@ -9,14 +9,80 @@ P = mpcpy.Params()
 
 import sys
 import time
+import ast
 
 import pybullet as p
 import sys
 import paho.mqtt.client as mqtt
 import datetime
+import inspect
 
-global lat_list
-lat_list = []
+
+state_rxvd = "last_cmd_rxvd"
+state_txd = "latest_state_txd"
+state_timeout = "timeout"
+state_msg_proc = "cloud_cmd_processing"
+
+global curr_state
+curr_state = state_rxvd
+global state_sq_no
+state_sq_no = 1
+global cloud_cmd_sq_no, local_cmd_sq_no
+cloud_cmd_sq_no = 9999
+local_cmd_sq_no = 9999
+global local_ctrl_cmd
+global path_num
+path_num=1
+global pid_path
+pid_path = []
+global current_idx_pid
+current_idx_pid = 0
+
+global last_state_time
+last_state_time = 0
+global counter
+counter = 0
+global x_history, y_history
+x_history = []
+y_history = []
+global cld_cmd_lat
+cld_cmd_lat = []
+global local_iter
+local_iter = 0
+global num_state_sent
+num_state_sent = 0
+global last_state_sq_no
+last_state_sq_no = 1
+
+global local_cmd_cnt, cloud_cmd_cnt
+local_cmd_cnt = 0
+cloud_cmd_cnt = 0
+
+global prev_error_angle, prev_error_position, prev_waypoint_idx, prev_body_to_goal
+global kp_linear, kd_linear, kp_angular, kd_angular
+prev_error_position = 0
+prev_error_angle = 0
+prev_body_to_goal = 0
+prev_waypoint_idx = -1
+kp_linear = 0.5
+kd_linear = 0.1
+ki_linear = 0
+kp_angular = 3
+kd_angular = 0.1
+ki_angular = 0
+
+# starting guess
+action = np.zeros(P.M)
+action[0] = P.MAX_ACC / 2  # a
+action[1] = 0.0  # delta
+
+# Cost Matrices
+Q = np.diag([20, 20, 10, 20])  # state error cost
+Qf = np.diag([30, 30, 30, 30])  # state final error cost
+R = np.diag([10, 10])  # input cost
+R_ = np.diag([10, 10])  # input rate of change cost
+
+mpc = mpcpy.MPC(P.N, P.M, Q, R)
 
 def get_state(robotId):
     """ """
@@ -29,30 +95,34 @@ def get_state(robotId):
             robPos[1],
             np.sqrt(linVel[0] ** 2 + linVel[1] ** 2),
             p.getEulerFromQuaternion(robOrn)[2],
+            state_sq_no,
+            path_num
         ]
     )
 
+def set_ctrl(robotId, currVel, acceleration, steeringAngle, cmd_sq_no, tag):
 
-def set_ctrl(robotId, currVel, acceleration, steeringAngle):
-
-    print("In set_ctrl function")
-    print(robotId, currVel, acceleration, steeringAngle)
+    # print("In set_ctrl function")
+    # print(robotId, currVel, acceleration, steeringAngle)
 
     gearRatio = 1.0 / 21
     steering = [0, 2]
     wheels = [8, 15]
     maxForce = 50
 
-    targetVelocity = (currVel + acceleration * P.DT)
+    if tag == 'local':
+        targetVelocity = acceleration
+    elif tag == 'cloud':
+        targetVelocity = (currVel + acceleration * P.DT)
     # targetVelocity=lastVel
-    print(targetVelocity)
+    # print(targetVelocity)
 
     for wheel in wheels:
         p.setJointMotorControl2(
             robotId,
             wheel,
             p.VELOCITY_CONTROL,
-            targetVelocity=targetVelocity*10, #/ gearRatio,
+            targetVelocity=targetVelocity/gearRatio,
             force=100,
         )
 
@@ -61,110 +131,13 @@ def set_ctrl(robotId, currVel, acceleration, steeringAngle):
             robotId, steer, p.POSITION_CONTROL, targetPosition=steeringAngle
         )
 
-def invoke_local_ctrl(car, state):
+    print("Rx cmd sq no: ", str(cmd_sq_no))
 
-    print("In local control")
-
-        # Interpolated Path to follow given waypoints
-    path = compute_path_from_wp(
-        [0, 3, 4, 6, 10, 11, 12, 6, 1, 0],
-        [0, 0, 2, 4, 3, 3, -1, -6, -2, -2],
-        P.path_tick,
-    )
-
-    # path = compute_path_from_wp(
-    #     [-3, -3, -5, -3, 2, 2, 4, 6, 6, 8, 8, 4, 4, 0, -2, -4, -6, -6],
-    #     [0, -2, -6, -7, -7, -2, -2, 0, 3, 5, 10, 10, 7, 7, 9, 9, 5, 2],
-    #     P.path_tick,
-    # )
-
-    # starting guess
-    action = np.zeros(P.M)
-    action[0] = P.MAX_ACC / 2  # a
-    action[1] = 0.0  # delta
-
-    # Cost Matrices
-    Q = np.diag([20, 20, 10, 20])  # state error cost
-    Qf = np.diag([30, 30, 30, 30])  # state final error cost
-    R = np.diag([10, 10])  # input cost
-    R_ = np.diag([10, 10])  # input rate of change cost
-
-    mpc = mpcpy.MPC(P.N, P.M, Q, R)
-    x_history = []
-    y_history = []
-
-    time.sleep(0.5)
-
-    x_history.append(state[0])
-    y_history.append(state[1])
-
-    # for MPC car ref frame is used
-    new_state = state
-    new_state[0:2] = 0.0
-    new_state[3] = 0.0
-    # new_state = np.ndarray(shape=(1,4), dtype=float)
-    # new_state[0,0]=0.0
-    # new_state[0,1] = 0.0
-    # new_state[0,2] = state[0,2]
-    # new_state[0,3] = 0.0
-    # state[0:2] = 0.0
-    # state[3] = 0.0
-
-    # add 1 timestep delay to input
-    print(new_state)
-    new_state[0] = new_state[0] + new_state[2] * np.cos(new_state[3]) * P.DT
-    new_state[1] = new_state[1] + new_state[2] * np.sin(new_state[3]) * P.DT
-    new_state[2] = new_state[2] + action[0] * P.DT
-    new_state[3] = new_state[3] + action[0] * np.tan(action[1]) / P.L * P.DT
-
-    # optimization loop
-    start = time.time()
-
-    # State Matrices
-    A, B, C = mpcpy.get_linear_model_matrices(new_state, action)
-
-    # Get Reference_traj -> inputs are in worldframe
-    target, _ = mpcpy.get_ref_trajectory(state, path, 1.0)
-
-    x_mpc, u_mpc = mpc.optimize_linearized_model(
-        A, B, C, state, target, time_horizon=P.T, verbose=False
-    )
-
-    # action = np.vstack((np.array(u_mpc.value[0,:]).flatten(),
-    #              (np.array(u_mpc.value[1,:]).flatten())))
-
-    action[:] = [u_mpc.value[0, 1], u_mpc.value[1, 1]]
-
-    elapsed = time.time() - start
-    print("CVXPY Optimization Time: {:.4f}s".format(elapsed))
-
-    global ctrl_cmd
-    # global old_cmd
-    # old_cmd = ctrl_cmd
-    ctrl_cmd = [state[2], action[0], action[1]]
-    print("Control command generated: "+str(ctrl_cmd))
-    set_ctrl(car, state[2], action[0], action[1])
-
-    if P.DT - elapsed > 0:
-        time.sleep(P.DT - elapsed)
-
-def where_to_ctrl(car, state):
-
-    print("In Where to Control")
-
-    if avg_lat>3:
-        print("Local control")
-        state = get_state(car)
-        invoke_local_ctrl(car, state)
-    else:
-        print("Cloud control")
-        set_ctrl(car, state[0], state[1], state[2])
-
-def plot_results(path, x_history, y_history):
+def plot_results(path, x_history, y_history, timeout):
     """ """
     plt.style.use("ggplot")
     plt.figure()
-    plt.title("MPC Tracking Results - Local+Cloud")
+    plt.title("Tracking Results - Local+Cloud")
 
     plt.plot(
         path[0, :], path[1, :], c="tab:orange", marker=".", label="reference track"
@@ -179,11 +152,324 @@ def plot_results(path, x_history, y_history):
     )
     plt.axis("equal")
     plt.legend()
-    plt.show()
+    # plt.show()
+    plt.savefig(f"MQTT_Transfer_PathNum_{path_num}_Timeout_{timeout}.png")
 
+def transform_path(path):
+    idx = 0
+    pid_path = []
+    while idx < len(path[0]):
+        curr_coord = []
+        curr_coord.append(path[0][idx])
+        curr_coord.append(path[1][idx])
+        pid_path.append(curr_coord)
+        idx = idx+1
+    # print(pid_path)
+    return pid_path
 
-# with open("output2.txt", 'w') as f:
-#     sys.stdout = f
+def check_path_num(path_var):
+    global path_num
+    if path_var[0] == [0, 6, 28, 28.5, 25, 26]:
+        path_num = 1
+    elif path_var[0] == [0, 2, 4, 8, 12, 20]:
+        path_num = 2
+    elif path_var[0] == [0, 1, -3, -5, -3, 2, 2, 4, 6, 6, 8, 8, 4, 4, 0, -2, -4, -6, -6]:
+        path_num = 3
+    elif path_var[0] == [0, 3, 4, 6, 10, 11, 12, 6, 1, 0]:
+        path_num = 4
+    elif path_var[0] == [0, 2, 3, 5, 6, 8, 8, 10, 8, 8, 6, 5, 3, 2, 0]:
+        path_num = 5
+    
+def env_setup(path_var):
+    p.connect(p.GUI)
+    p.resetDebugVisualizerCamera(
+        cameraDistance=1.0,
+        cameraYaw=-90,
+        cameraPitch=-45,
+        cameraTargetPosition=[-0.1, -0.0, 0.65],
+    )
+
+    p.resetSimulation()
+
+    p.setGravity(0, 0, -10)
+    useRealTimeSim = 1
+
+    p.setTimeStep(1.0 / 120.0)
+    p.setRealTimeSimulation(useRealTimeSim)  # either this
+
+    plane = p.loadURDF("racecar/plane.urdf")
+    # track = p.loadSDF("racecar/f10_racecar/meshes/barca_track.sdf", globalScaling=1)
+
+    global car
+    car = p.loadURDF("racecar/f10_racecar/racecar_differential.urdf", [0, 0, 0.3])
+    print("car:", car)
+    for wheel in range(p.getNumJoints(car)):
+        # print("joint[",wheel,"]=", p.getJointInfo(car,wheel))
+        p.setJointMotorControl2(
+            car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0
+        )
+        p.getJointInfo(car, wheel)
+
+    c = p.createConstraint(
+        car,
+        9,
+        car,
+        11,
+        jointType=p.JOINT_GEAR,
+        jointAxis=[0, 1, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=[0, 0, 0],
+    )
+    p.changeConstraint(c, gearRatio=1, maxForce=10000)
+
+    c = p.createConstraint(
+        car,
+        10,
+        car,
+        13,
+        jointType=p.JOINT_GEAR,
+        jointAxis=[0, 1, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=[0, 0, 0],
+    )
+    p.changeConstraint(c, gearRatio=-1, maxForce=10000)
+
+    c = p.createConstraint(
+        car,
+        9,
+        car,
+        13,
+        jointType=p.JOINT_GEAR,
+        jointAxis=[0, 1, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=[0, 0, 0],
+    )
+    p.changeConstraint(c, gearRatio=-1, maxForce=10000)
+
+    c = p.createConstraint(
+        car,
+        16,
+        car,
+        18,
+        jointType=p.JOINT_GEAR,
+        jointAxis=[0, 1, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=[0, 0, 0],
+    )
+    p.changeConstraint(c, gearRatio=1, maxForce=10000)
+
+    c = p.createConstraint(
+        car,
+        16,
+        car,
+        19,
+        jointType=p.JOINT_GEAR,
+        jointAxis=[0, 1, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=[0, 0, 0],
+    )
+    p.changeConstraint(c, gearRatio=-1, maxForce=10000)
+
+    c = p.createConstraint(
+        car,
+        17,
+        car,
+        19,
+        jointType=p.JOINT_GEAR,
+        jointAxis=[0, 1, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=[0, 0, 0],
+    )
+    p.changeConstraint(c, gearRatio=-1, maxForce=10000)
+
+    c = p.createConstraint(
+        car,
+        1,
+        car,
+        18,
+        jointType=p.JOINT_GEAR,
+        jointAxis=[0, 1, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=[0, 0, 0],
+    )
+    p.changeConstraint(c, gearRatio=-1, gearAuxLink=15, maxForce=10000)
+    c = p.createConstraint(
+        car,
+        3,
+        car,
+        19,
+        jointType=p.JOINT_GEAR,
+        jointAxis=[0, 1, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=[0, 0, 0],
+    )
+    p.changeConstraint(c, gearRatio=-1, gearAuxLink=15, maxForce=10000)
+
+    # Update path num
+    check_path_num(path_var)
+    
+    # Interpolated Path to follow given waypoints
+    path = compute_path_from_wp(
+        path_var[0],
+        path_var[1],
+        P.path_tick,
+    )
+
+    global pid_path
+    pid_path = transform_path(path)
+    # print(pid_path)
+
+    for x_, y_ in zip(path[0, :], path[1, :]):
+        p.addUserDebugLine([x_, y_, 0], [x_, y_, 0.33], [0, 0, 1])
+
+    return pid_path, path
+
+def timer_expired (last_state_time, timeout):
+    now = time.time()
+    if now-last_state_time >= timeout:
+        print(f"Timer({timeout}) Expired!!")
+        return True
+    else:
+        return False
+
+def get_distance(x1, y1, x2, y2):
+	return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+def get_angle(x1, y1, x2, y2):
+	# return np.arctan2(y2 - y1, x2 - x1)
+	return np.arctan2(y2 - y1, x2 - x1)
+
+def find_nearest_goal(pid_path, x_pos, y_pos):
+    waypoint_lst = [tuple(x) for x in pid_path]
+    waypoint_lst = np.array(waypoint_lst)
+    target = np.array((x_pos, y_pos))
+    dist = np.linalg.norm(waypoint_lst-target, axis=1)
+    min_idx = np.argmin(dist)
+    goal_pt = waypoint_lst[min_idx]
+    # print(type(goal_pt))
+    return goal_pt
+
+def calc_accuracy(pid_path,  x_history, y_history):
+    idx=0
+    err_array = np.zeros(len(x_history))
+    print("length", len(x_history))
+    while idx!=len(x_history):
+        # print("idx", idx)
+        target_waypt = find_nearest_goal(pid_path, x_history[idx], y_history[idx])
+        err = get_distance(target_waypt[0], target_waypt[1], x_history[idx], y_history[idx])
+        if err==0:
+            err_array[idx] = 1
+        elif err>0 or err<0.1:
+            err_array[idx] = 0.9
+        elif err>=0.1 or err<0.2:
+            err_array[idx] = 0.8
+        elif err>=0.2 or err<0.3:
+            err_array[idx] = 0.7
+        elif err>=0.3 or err<0.4:
+            err_array[idx] = 0.6
+        elif err>=0.4 or err<0.5:
+            err_array[idx] = 0.5
+        elif err>=0.5 or err<0.6:
+            err_array[idx] = 0.4
+        elif err>=0.6 or err<0.7:
+            err_array[idx] = 0.3
+        elif err>=0.7 or err<0.8:
+            err_array[idx] = 0.2
+        elif err>=0.8 or err<0.9:
+            err_array[idx] = 0.1
+        elif err>=0.9:
+            err_array[idx] = 0
+        idx = idx+1
+    return np.average(err_array)*100
+
+def get_pid_control_inputs(rx_state, goal_x, waypoint_idx):
+    global prev_error_angle, prev_error_position, prev_waypoint_idx, prev_body_to_goal
+    global kp_linear, kd_linear, kp_angular, kd_angular
+
+    error_position = get_distance(rx_state[0], rx_state[1], goal_x[0], goal_x[1])
+    
+    body_to_goal = get_angle(rx_state[0], rx_state[1], goal_x[0], goal_x[1])
+
+    # if self.prev_waypoint_idx == waypoint_idx and 350<(abs(self.prev_body_to_goal - body_to_goal)*180/np.pi):
+    # 	print("HERE")
+    # 	body_to_goal = self.prev_body_to_goal
+    error_angle = (body_to_goal) - rx_state[3]
+
+    linear_velocity_control = kp_linear*error_position + kd_linear*(error_position - prev_error_position)
+    angular_velocity_control = kp_angular*error_angle + kd_angular*(error_angle - prev_error_angle)
+
+    prev_error_angle = error_angle
+    prev_error_position = error_position
+
+    prev_waypoint_idx = waypoint_idx
+    prev_body_to_goal = body_to_goal
+
+    # if linear_velocity_control>0.5:
+    #     linear_velocity_control = 0.5
+
+    return linear_velocity_control, angular_velocity_control
+
+def invoke_local_control(path, rx_state, state_sq_no):
+
+    # print("In local control")
+
+    local_ctrl_start = time.time()
+    global pid_path, current_idx_pid, local_iter, curr_state
+    local_iter = 0
+    while local_iter<5:
+        if len(pid_path)>0:
+            goal_pt = find_nearest_goal(pid_path, rx_state[0], rx_state[1]) #pid_path[current_idx_pid] #find_nearest_goal(pid_path, rx_state) #target waypoint
+            linear_v, angular_v = get_pid_control_inputs(rx_state, goal_pt, current_idx_pid)
+            print("Current index", current_idx_pid)
+            print("Current x,y", rx_state[0], rx_state[1])
+            print("Target x,y", goal_pt[0], goal_pt[1])
+            print("Linear and angular velocity", linear_v, angular_v)
+            dist = get_distance(rx_state[0], rx_state[1], goal_pt[0], goal_pt[1])
+            if dist<1:
+                current_idx_pid+= 1
+                local_iter = local_iter+1
+                rx_state = get_state(car)
+            elif time.time()-local_ctrl_start>1:
+                print("-\n-\n-\n-\n-\n-\n-\n-\n-\n-\n--\n-\n-\n-\n-\n-\n-\n-\n-\n-\n--")
+                local_iter = 5
+
+        global local_cmd_sq_no, local_ctrl_cmd
+        local_cmd_sq_no = state_sq_no
+        local_ctrl_cmd = [rx_state[2], 0.5, angular_v, local_cmd_sq_no]
+        where_to_ctrl(car)
+    if local_iter == 5:
+        curr_state = state_rxvd
+    # print("Local control command generated: "+str(local_ctrl_cmd))
+
+def where_to_ctrl(car):
+
+    global local_cmd_sq_no, cloud_cmd_sq_no
+    global local_ctrl_cmd, cloud_ctrl_cmd
+    global curr_state, last_state_time
+    global local_cmd_cnt, cloud_cmd_cnt
+    print("In Where to Control")
+    now = time.time()
+
+    # Latest cloud command received
+    if curr_state == state_msg_proc and cloud_cmd_sq_no == state_sq_no-1:
+        # Apply cloud command
+        print("Applying cloud command")
+        cloud_cmd_cnt = cloud_cmd_cnt + 1
+        set_ctrl(car, cloud_ctrl_cmd[0], cloud_ctrl_cmd[1], cloud_ctrl_cmd[2], cloud_ctrl_cmd[3], tag='cloud')
+        curr_state = state_rxvd
+    # Latest local command ready
+    elif curr_state == state_timeout and local_cmd_sq_no == state_sq_no-1:
+        # Apply local command
+        print("Applying local command")
+        local_cmd_cnt = local_cmd_cnt + 1
+        set_ctrl(car, local_ctrl_cmd[0], local_ctrl_cmd[1], local_ctrl_cmd[2], local_ctrl_cmd[3], tag='local')
+    # If no control command is ready
+    elif now>last_state_time+1:
+        # Halt robot        
+        print("No command ready, halting robot")
+        set_ctrl(car, 0, 0, 0, 9999, tag='cloud')
+        last_state_time = time.time()
+        curr_state = state_rxvd
 
 def on_log(client, userdata, level, buf):
     now = datetime.datetime.now()
@@ -191,264 +477,194 @@ def on_log(client, userdata, level, buf):
     # f.write(" log: "+buf+'\n')
 
 def on_connect(client, userdata, flags, rc):
+    print("in connect ", inspect.stack()[1].function)
     if rc==0:
         now = datetime.datetime.now()
         # f.write(str(now.time()))
-        # f.write(" Connection ok"+'\n')
+        print(" Connection ok"+'\n')
     else:
         now = datetime.datetime.now()
         # f.write(str(now.time()))
-        # f.write(" Bad connection, exited with code "+str(rc)+'\n')
+        print(" Bad connection, exited with code "+str(rc)+'\n')
+
+def on_disconnect(client, userdata, flags, rc=0):
+    now = datetime.datetime.now()
+    # f.write(str(now.time()))
+    # f.write(" Disconnection with code "+str(rc))+'\n'
 
 def on_message(client, userdata, msg):
-    now = datetime.datetime.now()
     topic = msg.topic
+    global curr_state
+    if curr_state == "end_sim":
+        return
+    elif curr_state == state_txd:
+        curr_state = state_msg_proc
     msg_decode = str(msg.payload.decode("utf-8"))
-    # now = datetime.datetime.now()
-    # f.write(str(now.time()))
+    global last_cmd_time
+    last_cmd_time = time.time()
     print("Message received: "+msg_decode+'\n')
+
+    global cloud_cmd_sq_no, cloud_ctrl_cmd, state_sq_no   
 
     msg_decode = msg_decode.split("[")[1].split("]")[0]
     temp_state = list(msg_decode.split(","))
     temp_state[0]=float(temp_state[0])
     temp_state[1] = float(temp_state[1])
     temp_state[2] = float(temp_state[2])
+    temp_state[3] = float(temp_state[3])
+    cloud_cmd_sq_no = temp_state[3]
     state = np.asarray(temp_state)
 
-    global avg_lat
+    global cld_cmd_lat, last_state_time
+    if state_sq_no-1 == cloud_cmd_sq_no:
+        latency = last_cmd_time-last_state_time
+        print("On message latency: ", latency)
+        if latency>10000:
+            return
+        cld_cmd_lat.append(latency)
 
-    latency = now - pub_time
-    latency = latency.total_seconds()
-    print("latency: ",latency)
-    lat_list.append(latency)
-    avg_lat = np.average(lat_list)
-    print("avg latency: ",avg_lat)
-    where_to_ctrl(car, state)
-    # set_ctrl(car, state[0], state[1], state[2])
-    
+    cloud_ctrl_cmd = [state[0], state[1], state[2], cloud_cmd_sq_no]
+    where_to_ctrl(car)
 
-# def on_disconnect(client, userdata, flags, rc=0):
-#     now = datetime.datetime.now()
-#     f.write(str(now.time()))
-#     f.write(" Disconnection with code "+str(rc))+'\n'
+broker = "54.214.83.235"
 
-
-broker = "test.mosquitto.org"
-
-client = mqtt.Client("Robot")
+client = mqtt.Client("Robot1")
 
 client.on_connect = on_connect
 client.on_log = on_log
 client.on_message = on_message
-# client.on_disconnect = on_disconnect
-
-now = datetime.datetime.now()
-# f.write(str(now.time()))
-# f.write(" Connecting to broker "+broker+'\n')
+client.on_disconnect = on_disconnect
 
 client.connect(broker)
 
-p.connect(p.GUI)
-p.resetDebugVisualizerCamera(
-    cameraDistance=1.0,
-    cameraYaw=-90,
-    cameraPitch=-45,
-    cameraTargetPosition=[-0.1, -0.0, 0.65],
-)
-
-p.resetSimulation()
-
-p.setGravity(0, 0, -10)
-useRealTimeSim = 1
-
-p.setTimeStep(1.0 / 120.0)
-p.setRealTimeSimulation(useRealTimeSim)  # either this
-
-plane = p.loadURDF("racecar/plane.urdf")
-# track = p.loadSDF("racecar/f10_racecar/meshes/barca_track.sdf", globalScaling=1)
-
-global car
-car = p.loadURDF("racecar/f10_racecar/racecar_differential.urdf", [0, 0, 0.3])
-print("car:", car)
-for wheel in range(p.getNumJoints(car)):
-    # print("joint[",wheel,"]=", p.getJointInfo(car,wheel))
-    p.setJointMotorControl2(
-        car, wheel, p.VELOCITY_CONTROL, targetVelocity=0, force=0
-    )
-    p.getJointInfo(car, wheel)
-
-c = p.createConstraint(
-    car,
-    9,
-    car,
-    11,
-    jointType=p.JOINT_GEAR,
-    jointAxis=[0, 1, 0],
-    parentFramePosition=[0, 0, 0],
-    childFramePosition=[0, 0, 0],
-)
-p.changeConstraint(c, gearRatio=1, maxForce=10000)
-
-c = p.createConstraint(
-    car,
-    10,
-    car,
-    13,
-    jointType=p.JOINT_GEAR,
-    jointAxis=[0, 1, 0],
-    parentFramePosition=[0, 0, 0],
-    childFramePosition=[0, 0, 0],
-)
-p.changeConstraint(c, gearRatio=-1, maxForce=10000)
-
-c = p.createConstraint(
-    car,
-    9,
-    car,
-    13,
-    jointType=p.JOINT_GEAR,
-    jointAxis=[0, 1, 0],
-    parentFramePosition=[0, 0, 0],
-    childFramePosition=[0, 0, 0],
-)
-p.changeConstraint(c, gearRatio=-1, maxForce=10000)
-
-c = p.createConstraint(
-    car,
-    16,
-    car,
-    18,
-    jointType=p.JOINT_GEAR,
-    jointAxis=[0, 1, 0],
-    parentFramePosition=[0, 0, 0],
-    childFramePosition=[0, 0, 0],
-)
-p.changeConstraint(c, gearRatio=1, maxForce=10000)
-
-c = p.createConstraint(
-    car,
-    16,
-    car,
-    19,
-    jointType=p.JOINT_GEAR,
-    jointAxis=[0, 1, 0],
-    parentFramePosition=[0, 0, 0],
-    childFramePosition=[0, 0, 0],
-)
-p.changeConstraint(c, gearRatio=-1, maxForce=10000)
-
-c = p.createConstraint(
-    car,
-    17,
-    car,
-    19,
-    jointType=p.JOINT_GEAR,
-    jointAxis=[0, 1, 0],
-    parentFramePosition=[0, 0, 0],
-    childFramePosition=[0, 0, 0],
-)
-p.changeConstraint(c, gearRatio=-1, maxForce=10000)
-
-c = p.createConstraint(
-    car,
-    1,
-    car,
-    18,
-    jointType=p.JOINT_GEAR,
-    jointAxis=[0, 1, 0],
-    parentFramePosition=[0, 0, 0],
-    childFramePosition=[0, 0, 0],
-)
-p.changeConstraint(c, gearRatio=-1, gearAuxLink=15, maxForce=10000)
-c = p.createConstraint(
-    car,
-    3,
-    car,
-    19,
-    jointType=p.JOINT_GEAR,
-    jointAxis=[0, 1, 0],
-    parentFramePosition=[0, 0, 0],
-    childFramePosition=[0, 0, 0],
-)
-p.changeConstraint(c, gearRatio=-1, gearAuxLink=15, maxForce=10000)
-
-# Interpolated Path to follow given waypoints
-# path = compute_path_from_wp(
-#     [0, 3, 4, 6, 10, 11, 12, 6, 1, 0],
-#     [0, 0, 2, 4, 3, 3, -1, -6, -2, -2],
-#     P.path_tick,
-# )
-
-path = compute_path_from_wp(
-    [0, 6, 28, 28.5, 25, 26],
-    [0, 7.5, -5.5, 0.8, 1.8, 6.8],
-    P.path_tick,
-)
-
-# path = compute_path_from_wp(
-#     [-3, -3, -5, -3, 2, 2, 4, 6, 6, 8, 8, 4, 4, 0, -2, -4, -6, -6],
-#     [0, -2, -6, -7, -7, -2, -2, 0, 3, 5, 10, 10, 7, 7, 9, 9, 5, 2],
-#     P.path_tick,
-# )
-
-for x_, y_ in zip(path[0, :], path[1, :]):
-    p.addUserDebugLine([x_, y_, 0], [x_, y_, 0.33], [0, 0, 1])
-
-# starting guess
-action = np.zeros(P.M)
-action[0] = P.MAX_ACC / 2  # a
-action[1] = 0.0  # delta
-
-# Cost Matrices
-Q = np.diag([20, 20, 10, 20])  # state error cost
-Qf = np.diag([30, 30, 30, 30])  # state final error cost
-R = np.diag([10, 10])  # input cost
-R_ = np.diag([10, 10])  # input rate of change cost
-
-mpc = mpcpy.MPC(P.N, P.M, Q, R)
-x_history = []
-y_history = []
-
-time.sleep(0.5)
-
 client.loop_start()
-while True:
-    # f.flush()
+
+def reset_sim(path_var, timeout):
+    global last_state_time, counter, sim_start_time, cld_cmd_lat
+    global x_history, y_history, curr_state, state_sq_no
+    global local_cmd_cnt, cloud_cmd_cnt, timeout_cnt
+    global num_state_sent
+
+    last_state_time = 0
+    counter = 0
+    x_history = []
+    y_history = []
+    cld_cmd_lat = []
+    curr_state = state_rxvd
+    state_sq_no = 1
+    num_state_sent = 0
+    local_cmd_cnt = 0
+    cloud_cmd_cnt = 0
+    timeout_cnt = 0
+    # Get simulation start time
+    sim_start_time = time.time()
+
+    acc, rxvd_lat, timeout_cnt, state_sq_no = start_sim(path_var, timeout)
+    print(num_state_sent)
+    return acc, cld_cmd_lat, rxvd_lat, timeout_cnt, state_sq_no, local_cmd_cnt, cloud_cmd_cnt
+
+
+def start_sim(path_var, timeout):
+
+    global last_state_time, curr_state, state_sq_no, sim_start_time
+    global num_state_sent, last_state_sq_no
+
+    # Process path variable from str to list
+    path_var = ast.literal_eval(path_var)
+    pid_path, path = env_setup(path_var)
+
+    timeout_cnt = 0
     state = get_state(car)
-    print("Sent new state",str(state))
 
-    client.publish("/robot/state", str(state))
-    global pub_time
-    pub_time = datetime.datetime.now()
-    print("pub time: ",pub_time)
+    sim_start_time = time.time()
 
-    time.sleep(5)
+    while True:
+        # f.flush()
 
-    client.subscribe("/robot/command")
-
-    # track path in bullet
-    p.addUserDebugLine(
-        [state[0], state[1], 0], [state[0], state[1], 0.5], [1, 0, 0]
-    )
-
-    if np.sqrt((state[0] - path[0, -1]) ** 2 + (state[1] - path[1, -1]) ** 2) < 0.2:
-        print("Success! Goal Reached")
-        set_ctrl(car, 0, 0, 0)
-        plot_results(path, x_history, y_history)
-        p.disconnect()
-
-
-    elapsed = time.time()
-    print("CVXPY Optimization Time: {:.4f}s".format(elapsed))
-
-    if P.DT - elapsed > 0:
-        time.sleep(P.DT - elapsed)
-
-
-    # time.sleep(4)
-    # f.flush()
-
-        # client.loop_stop()
-        # client.disconnect()
+        # state = get_state(car)
         
-        # f.close()
+        if curr_state == state_txd and timer_expired(last_state_time, timeout):
+            timeout_cnt = timeout_cnt + 1
+            curr_state = state_timeout
+            # invoke_local_control(path, state, state_sq_no-1)
+            # curr_state = state_timeout
+            # where_to_ctrl(car)
+        elif curr_state == state_timeout:
+            print("State machine at: ", curr_state)
+            invoke_local_control(path, state, state_sq_no-1)
+            # # Resend new state after 100ms
+            # time.sleep(0.08)
+            # curr_state = state_rxvd
+        elif curr_state == state_rxvd:
+            print("State machine at: ", curr_state)
+            # send new state
+            state = get_state(car)
+            print("Sent new state",str(state))
+            client.publish("/robot/state", str(state), 2)
+            last_state_time = time.time()
+            last_state_sq_no = last_state_sq_no + 1
+            # print("Last state time: ",last_state_time)
+            state_sq_no = state_sq_no + 1
+            num_state_sent = num_state_sent + 1
+            if state_sq_no >= 2000:
+                print("Failed! Car in bad state")
+                set_ctrl(car, 0, 0, 0, 9999, tag='cloud')
+                curr_state = "end_sim"
+                plot_results(path, x_history, y_history, timeout)
+                # client.disconnect()
+                # client.loop_stop()
+                p.disconnect()
+                time_taken = None
+                acc = None
+                return acc, time_taken, timeout_cnt, state_sq_no
+            # also compute local command
+            # invoke_local_control(path, state, state_sq_no-1)
+            curr_state = state_txd
+            print("State machine at: ", curr_state)
+            print('\n')
+        elif curr_state == state_txd:
+            client.subscribe("/robot/command")
+            global counter
+            counter = counter+1
+            if counter % 10 == 0:
+                print("State machine at: ", curr_state)
+        elif curr_state == state_msg_proc:
+            print("State machine at: ", curr_state)
+            counter = counter+1
+            if counter % 10 == 0:
+                print("State machine at: ", curr_state)
+            # wait for new cmd to arrive
+            # time.sleep(3.5)
+
+        # track path in bullet
+        p.addUserDebugLine(
+            [state[0], state[1], 0], [state[0], state[1], 0.5], [1, 0, 0]
+        )
+
+        x_history.append(state[0])
+        y_history.append(state[1])
+
+        if np.sqrt((state[0] - path[0, -1]) ** 2 + (state[1] - path[1,-1]) ** 2) < 0.4:
+            print("Success! Goal Reached")
+            set_ctrl(car, 0, 0, 0, 9999, tag='cloud')
+            curr_state = "end_sim"
+            
+            # Get simulation end time
+            sim_end_time = time.time()
+            time_taken = sim_end_time-sim_start_time
+            print("Time at finish: ", sim_end_time)
+            print("Total time: ", time_taken)
+
+            plot_results(path, x_history, y_history, timeout)
+            accuracy = calc_accuracy(pid_path, x_history, y_history)
+            print("Accuracy: ", accuracy)
+            # client.disconnect()
+            # client.loop_stop()
+            p.disconnect()
+            return accuracy, time_taken, timeout_cnt, state_sq_no
+
+
+if __name__ == "__main__":
+    path = str(sys.argv[1])
+    timeout = float(sys.argv[2])
+    start_sim(path, timeout)

@@ -12,4 +12,6 @@ Scripts:
 
 6. [SOCKET] Local+Cloud Switching Control using MPC: mpc_python_master/mpc_python_demo/mpc_socket_lc_cloud_transfer.py and mpc_python_master/mpc_python_demo/mpc_socket_lc_robot_transfer.py
 
+7. Script to automate multiple iterations, timeouts and robot paths : mpc_python_master/mpc_python_demo/start_script.py 
+
 Note: Remember to update EC2 IP address in cloud scripts (#3, #4, #5, #6)
