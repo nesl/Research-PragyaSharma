@@ -58,8 +58,8 @@ mpc = mpcpy.MPC(P.N, P.M, Q, R)
 def get_path_from_num(path_num):
     if path_num == 1:
         path = compute_path_from_wp(
-            [0, 6, 28, 28.5],
-            [0, 7.5, -5.5, 0.8],
+            [0, 4, 6, 8],
+            [0, 0, -2, 2],
             P.path_tick,)
     elif path_num == 2:
         path = compute_path_from_wp(

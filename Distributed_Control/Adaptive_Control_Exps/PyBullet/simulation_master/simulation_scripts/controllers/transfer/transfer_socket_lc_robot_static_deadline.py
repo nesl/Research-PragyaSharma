@@ -1,29 +1,26 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import animation
-
+import sys
+import time
+import pybullet as p
+import socket
+import signal
+import select
+import ast
 from mpcpy.utils import compute_path_from_wp
 import mpcpy
 
 P = mpcpy.Params()
 
-import sys
-import time
-
-import pybullet as p
-import sys
-import paho.mqtt.client as mqtt
-import datetime
-
-import socket
-import ast
-
 HEADER = 64
-PORT = 5060
+PORT_CLOUD = 5061
+PORT_LOCAL = 5060
 FORMAT = 'utf-8'
 DISCONNECT_MESSAGE = "!DISCONNECT"
-SERVER = "54.177.79.188"#13.52.247.117"
-ADDR = (SERVER, PORT)
+SERVER_CLOUD = "127.0.0.1"
+ADDR_CLOUD = (SERVER_CLOUD, PORT_CLOUD)
+SERVER_LOCAL = "127.0.0.1"
+ADDR_LOCAL = (SERVER_LOCAL, PORT_LOCAL)
 
 state_rxvd = "last_cmd_rxvd"
 state_txd = "latest_state_txd"
@@ -56,8 +53,6 @@ counter = 0
 global x_history, y_history
 x_history = []
 y_history = []
-global cld_cmd_lat
-cld_cmd_lat = []
 global local_iter
 local_iter = 0
 global num_state_sent
@@ -68,6 +63,15 @@ last_state_sq_no = 1
 global local_cmd_cnt, cloud_cmd_cnt
 local_cmd_cnt = 0
 cloud_cmd_cnt = 0
+
+global lcl_proc_lat, lcl_net_lat, lcl_cmd_lat
+global cld_proc_lat, cld_net_lat, cld_cmd_lat
+lcl_proc_lat = []
+lcl_net_lat = []
+lcl_cmd_lat = []
+cld_proc_lat = []
+cld_net_lat = []
+cld_cmd_lat = []
 
 global prev_error_angle, prev_error_position, prev_waypoint_idx, prev_body_to_goal
 global kp_linear, kd_linear, kp_angular, kd_angular
@@ -99,7 +103,7 @@ def get_state(robotId):
     )
 
 def set_ctrl(robotId, currVel, acceleration, steeringAngle, cmd_sq_no, tag):
-
+    global curr_state
     # print("In set_ctrl function")
     # print(robotId, currVel, acceleration, steeringAngle)
 
@@ -131,6 +135,8 @@ def set_ctrl(robotId, currVel, acceleration, steeringAngle, cmd_sq_no, tag):
     
     if cmd_sq_no==9999:
         return
+    else:
+        curr_state = state_rxvd
 
     print("Rx cmd sq no: ", str(cmd_sq_no))
 
@@ -170,7 +176,7 @@ def transform_path(path):
 
 def check_path_num(path_var):
     global path_num
-    if path_var[0] == [0, 6, 28, 28.5]:
+    if path_var[0] == [0, 4, 6, 8]:
         path_num = 1
     elif path_var[0] == [0, 2, 4, 8, 12, 20]:
         path_num = 2
@@ -353,10 +359,11 @@ def env_setup(path_var):
 
 def timer_expired (last_state_time, timeout):
     now = time.time()
-    if now-last_state_time >= 0.2:
+    if now-last_state_time >= 0.08:
         print(f"Timer({timeout}) Expired!!")
         return True
     else:
+        print(f"Timer({timeout}) Not Expired!!")
         return False
 
 def get_distance(x1, y1, x2, y2):
@@ -381,22 +388,29 @@ def calc_accuracy(path,  x_history, y_history):
     err_bound = 1
     err_array = np.zeros(len(x_history))
     trans_path = transform_path(path)
-    print(len(trans_path))
-    print(len(x_history))
+    # print(len(trans_path))
+    # print(len(x_history))
     # print(trans_path)
     
     while idx!=len(x_history)-1:
-        print("idx:", idx)
+        # print("idx:", idx)
         target_waypt = find_nearest_goal(trans_path, x_history[idx], y_history[idx])
         err = get_distance(target_waypt[0], target_waypt[1], x_history[idx], y_history[idx])
-        print(target_waypt[0], target_waypt[1], x_history[idx], y_history[idx], err)
+        # print(target_waypt[0], target_waypt[1], x_history[idx], y_history[idx], err)
         if err>err_bound:
             err = err_bound
         err_array[idx] = ((err_bound - err)/err_bound)*100
-        print(err_array[idx])
-        print("average = ", np.average(err_array))
+        # print(err_array[idx])
+        # print("average = ", np.average(err_array))
         idx = idx+1
     return np.average(err_array)
+
+def get_waypoints_list(trans_path):
+    waypoint_lst = [tuple(x) for x in trans_path]
+    print("Size before transform: ", np.shape(waypoint_lst))
+    waypoint_lst = np.array(waypoint_lst)
+    print("Size after transform: ", np.shape(waypoint_lst))
+    return waypoint_lst
 
 def get_pid_control_inputs(rx_state, goal_x, waypoint_idx):
     global prev_error_angle, prev_error_position, prev_waypoint_idx, prev_body_to_goal
@@ -459,6 +473,19 @@ def invoke_local_control(path, rx_state, state_sq_no):
     #     curr_state = state_rxvd
     # print("Local control command generated: "+str(local_ctrl_cmd))
 
+def to_actuate(last_cmd_time):
+    global actuation_tick
+    print("In to actuate")
+    print("Current time = ", time.time())
+    print("Last cmd time = ", last_cmd_time)
+    print("Current time - Last cmd time = ", time.time() - last_cmd_time)
+    print("Actuation tick = ", actuation_tick)
+    
+    time_to_next_tick = actuation_tick - ((time.time() - last_cmd_time)%(actuation_tick))
+    print("Sleeping for ", time_to_next_tick)
+    time.sleep(time_to_next_tick)
+    actuation_tick = 0.85
+
 def where_to_ctrl(car):
 
     global local_cmd_sq_no, cloud_cmd_sq_no
@@ -474,14 +501,14 @@ def where_to_ctrl(car):
         print("Applying cloud command")
         cloud_cmd_cnt = cloud_cmd_cnt + 1
         set_ctrl(car, cloud_ctrl_cmd[0], cloud_ctrl_cmd[1], cloud_ctrl_cmd[2], cloud_ctrl_cmd[3], tag='cloud')
-        curr_state = state_rxvd
+        # curr_state = state_rxvd
     # Latest local command ready
     elif local_cmd_sq_no == state_sq_no-1: #curr_state == state_timeout and 
         # Apply local command
         print("Applying local command")
         local_cmd_cnt = local_cmd_cnt + 1
         set_ctrl(car, local_ctrl_cmd[0], local_ctrl_cmd[1], local_ctrl_cmd[2], local_ctrl_cmd[3], tag='local')
-        curr_state = state_rxvd
+        # curr_state = state_rxvd
     # If no control command is ready
     # elif now>last_state_time+1:
     #     # Halt robot        
@@ -490,30 +517,95 @@ def where_to_ctrl(car):
     #     last_state_time = time.time()
     #     curr_state = state_rxvd
 
-def connect():
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect(ADDR)
-    return client
+def handle_timeout(sig, frame):
+    print("In timeout handler!")
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    where_to_ctrl(car)
 
-def send(client, msg):
+def connect_local():
+    client_local = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_local.connect(ADDR_LOCAL)
+    # client_local.settimeout(0.08)
+    return client_local
+
+def connect_cloud():
+    client_cloud = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_cloud.connect(ADDR_CLOUD)
+    # client_cloud.settimeout(0.08)
+    return client_cloud
+
+def send_local(client_local, msg):
+    global last_state_time
     message = msg.encode(FORMAT)
     msg_length = len(message)
     send_length = str(msg_length).encode(FORMAT)
     send_length += b' ' * (HEADER - len(send_length))
-    client.send(send_length)
-    client.send(message)
+    client_local.send(send_length)
+    client_local.send(message)
+    # last_state_time = time.time()
+    # print("send_time in send: ", last_state_time)
 
-def recv(client):
-    msg_decode = client.recv(2048).decode(FORMAT)
+def send_cloud(client_cloud, msg):
+    message = msg.encode(FORMAT)
+    msg_length = len(message)
+    send_length = str(msg_length).encode(FORMAT)
+    send_length += b' ' * (HEADER - len(send_length))
+    client_cloud.send(send_length)
+    client_cloud.send(message)
+
+def recv_local(client_local):
+    msg_decode = client_local.recv(2048).decode(FORMAT)
     global last_cmd_time, curr_state
     global prev_cmd_time
     # prev_cmd_time = last_cmd_time
     last_cmd_time = time.time()
-    print("Message received: "+msg_decode+'\n')
+    print("Local Message received: "+msg_decode+'\n')
     if curr_state == "end_sim":
         return
-    elif curr_state == state_txd:
-        curr_state = state_msg_proc
+    # elif curr_state == state_txd:
+    #     curr_state = state_msg_proc
+    
+    global local_cmd_sq_no, local_ctrl_cmd, state_sq_no
+
+    msg_decode = msg_decode.split("[")[1].split("]")[0]
+    temp_state = list(msg_decode.split(","))
+    temp_state[0]=float(temp_state[0])
+    temp_state[1] = float(temp_state[1])
+    temp_state[2] = float(temp_state[2])
+    temp_state[3] = float(temp_state[3])
+    temp_state[4] = float(temp_state[4])
+    local_cmd_sq_no = temp_state[3]
+    state = np.asarray(temp_state)
+
+    global lcl_cmd_lat, last_state_time, lcl_proc_lat, lcl_net_lat
+    if state_sq_no-1 == local_cmd_sq_no:
+        lcl_proc_lat.append(state[4])
+        print("send_time in recv_local: ", last_state_time)
+        latency = last_cmd_time-last_state_time
+        print("Local Message received latency: ", latency)
+        if latency>10000:
+            return
+        lcl_cmd_lat.append(latency)
+        net_lat_time = latency-state[4]
+        lcl_net_lat.append(net_lat_time)
+        print("Local Computation  latency: ", state[4])
+        print("Local Network  latency: ", net_lat_time)
+
+    local_ctrl_cmd = [state[0], state[1], state[2], local_cmd_sq_no]
+    # where_to_ctrl(car)
+
+
+def recv_cloud(client_cloud):
+    msg_decode = client_cloud.recv(2048).decode(FORMAT)
+    global last_cmd_time, curr_state
+    global prev_cmd_time
+    # prev_cmd_time = last_cmd_time
+    last_cmd_time = time.time()
+    print("Cloud Message received: "+msg_decode+'\n')
+    if curr_state == "end_sim":
+        return
+    # elif curr_state == state_txd:
+    #     curr_state = state_msg_proc
     
     global cloud_cmd_sq_no, cloud_ctrl_cmd, state_sq_no
 
@@ -523,22 +615,31 @@ def recv(client):
     temp_state[1] = float(temp_state[1])
     temp_state[2] = float(temp_state[2])
     temp_state[3] = float(temp_state[3])
+    temp_state[4] = float(temp_state[4])
     cloud_cmd_sq_no = temp_state[3]
     state = np.asarray(temp_state)
 
-    global cld_cmd_lat, last_state_time
+    global cld_cmd_lat, last_state_time, cld_proc_lat, cld_net_lat
     if state_sq_no-1 == cloud_cmd_sq_no:
+        cld_proc_lat.append(state[4])
+        print("send_time in recv_cloud: ", last_state_time)
         latency = last_cmd_time-last_state_time
-        print("On message latency: ", latency)
+        print("Cloud Message received latency: ", latency)
         if latency>10000:
             return
         cld_cmd_lat.append(latency)
+        net_lat_time = latency-state[4]
+        cld_net_lat.append(net_lat_time)
+        print("Cloud Computation  latency: ", state[4])
+        print("Cloud Network  latency: ", net_lat_time)
 
     cloud_ctrl_cmd = [state[0], state[1], state[2], cloud_cmd_sq_no]
-    where_to_ctrl(car)
+    # where_to_ctrl(car)
     
-global client
-client = connect()
+global client_local, client_cloud
+client_local = connect_local()
+client_cloud = connect_cloud()
+signal.signal(signal.SIGALRM, handle_timeout)
 
 def have_reached(state, path, timeout):
     global sim_start_time, pid_path
@@ -569,6 +670,8 @@ def reset_sim(path_var, timeout):
     global last_state_time, counter, sim_start_time, cld_cmd_lat
     global x_history, y_history, curr_state, state_sq_no, pid_path
     global num_state_sent, local_cmd_cnt, cloud_cmd_cnt, timeout_cnt
+    global lcl_proc_lat, lcl_net_lat, lcl_cmd_lat
+    global cld_proc_lat, cld_net_lat, cld_cmd_lat
 
     last_state_time = 0
     counter = 0
@@ -584,11 +687,23 @@ def reset_sim(path_var, timeout):
     timeout_cnt = 0
     sensing_tick = 0.08
     actuation_tick = 0.45
+    lcl_proc_lat = []
+    lcl_net_lat = []
+    lcl_cmd_lat = []
+    cld_proc_lat = []
+    cld_net_lat = []
+    cld_cmd_lat = []
     # Get simulation start time
     sim_start_time = time.time()
 
     acc, rxvd_lat, timeout_cnt, state_sq_no = start_sim(path_var, timeout)
-    return acc, cld_cmd_lat, rxvd_lat, timeout_cnt, state_sq_no
+    waypoints_list = get_waypoints_list(pid_path)  
+    x_waypts = []
+    y_waypts = []
+    for i in waypoints_list:
+        x_waypts.append(i[0])
+        y_waypts.append(i[1])
+    return acc, cld_cmd_lat, rxvd_lat, timeout_cnt, state_sq_no, cld_proc_lat, cld_net_lat, lcl_cmd_lat, lcl_proc_lat, lcl_net_lat, x_waypts, y_waypts, x_history, y_history
 
 def start_sim(path_var, timeout):
 
@@ -604,55 +719,66 @@ def start_sim(path_var, timeout):
 
     sim_start_time = time.time()
 
+    sockets = [client_local, client_cloud]
+
     while True:
         # f.flush()
-        if curr_state == state_txd and timer_expired(last_state_time, timeout):
+        # if curr_state == state_txd and timer_expired(last_state_time, timeout):
             # print(f"Timeout: {timeout}; halting car")
             # set_ctrl(car, 0, 0, 0, 9999) # Halt car
             # last_state_time = time.time()
-            timeout_cnt = timeout_cnt+1
-            where_to_ctrl(car)
+            # timeout_cnt = timeout_cnt+1
+            # where_to_ctrl(car)
             # curr_state = state_timeout
         # elif curr_state == state_timeout:
         #     print("State machine at: ", curr_state)
             # invoke_local_control(path, state, state_sq_no-1)
             # Resend new state after 100ms
             # time.sleep(0.08)
+            # where_to_ctrl(car)
             # curr_state = state_rxvd
-        elif curr_state == state_rxvd:
+        if curr_state == state_rxvd:
             print("State machine at: ", curr_state)
             # send new state
             state = get_state(car)
             print("Sent new state",str(state))
-            send(client, str(state))
+            send_local(client_local, str(state))
+            send_cloud(client_cloud, str(state))
             last_state_time = time.time()
-            # print(last_state_time)
+            signal.setitimer(signal.ITIMER_REAL, 0.5, 0)
+            print("send_time in while loop: ", last_state_time)
             state_sq_no = state_sq_no + 1
             num_state_sent = num_state_sent + 1
-            invoke_local_control(path, state, state_sq_no-1)
-            if state_sq_no >= 2000:
-                print("Failed! Car in bad state")
-                set_ctrl(car, 0, 0, 0, 9999, tag='cloud')
-                curr_state = "end_sim"
-                plot_results(path, x_history, y_history, timeout)
-                p.disconnect()
-                time_taken = None
-                acc = None
-                return acc, time_taken, timeout_cnt, state_sq_no
+            # invoke_local_control(path, state, state_sq_no-1)
             curr_state = state_txd
             print("State machine at: ", curr_state)
             print('\n')
         elif curr_state == state_txd:
-            recv(client)
+            # try:
+            start_time = time.time()
+            readable_sockets, _, _ = select.select(sockets, [], [], 0.5)
+            # print(readable_sockets)
+            if client_local in readable_sockets:
+                recv_local(client_local)
+            if client_cloud in readable_sockets:
+                recv_cloud(client_cloud)
+            # if time.time() - start_time > 0.1:
+            #     curr_state = state_msg_proc
+            # except socket.timeout:
+            #     print("Timeout!!!!")
+            #     timeout = last_state_time - time.time()
+            #     print("Timeout at ", timeout)
+            #     where_to_ctrl(car)
             global counter
             counter = counter+1
             if counter % 10 == 0:
                 print("State machine at: ", curr_state)
-        elif curr_state == state_msg_proc:
-            print("State machine at: ", curr_state)
-            counter = counter+1
-            if counter % 10 == 0:
-                print("State machine at: ", curr_state)
+        # elif curr_state == state_msg_proc:
+        #     print("State machine at: ", curr_state)
+        #     where_to_ctrl(car)
+        #     counter = counter+1
+        #     if counter % 10 == 0:
+        #         print("State machine at: ", curr_state)
             # wait for new cmd to arrive
             # time.sleep(3.5)
 

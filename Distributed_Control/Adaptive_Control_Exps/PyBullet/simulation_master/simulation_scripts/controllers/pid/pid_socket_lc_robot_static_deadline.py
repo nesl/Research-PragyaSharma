@@ -228,7 +228,7 @@ def transform_path(path):
 
 def check_path_num(path_var):
     global path_num
-    if path_var[0] == [0, 6, 28, 28.5]:
+    if path_var[0] == [0, 4, 6, 8]:
         path_num = 1
     elif path_var[0] == [0, 2, 4, 8, 12, 20]:
         path_num = 2
