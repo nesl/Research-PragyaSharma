@@ -1,0 +1,37 @@
+----------- Pylot Docker Instructions ----------
+
+
+--- Create new container ------
+
+docker pull erdosproject/pylot
+nvidia-docker run -itd --name pylot -p 20022:22 erdosproject/pylot /bin/bash
+
+nvidia-docker cp ~/.ssh/id_rsa.pub pylot:/home/erdos/.ssh/authorized_keys
+nvidia-docker exec -i -t pylot sudo chown erdos /home/erdos/.ssh/authorized_keys
+nvidia-docker exec -i -t pylot sudo service ssh start
+
+ssh -p 20022 -X erdos@localhost
+cd /home/erdos/workspace/pylot/
+python3 pylot.py --flagfile=configs/detection.conf --visualize_detected_obstacles
+
+
+--- Start/Stop Container ------
+
+docker ps					#show all running containers
+docker start <cont-id>
+docker stop <cont-id>
+docker rm <cont-id>
+
+
+--- Start Existing Pylot Container ------
+
+Terminal 1: sudo start <cont-id>
+
+Terminal 2: nvidia-docker exec -i -t pylot /home/erdos/workspace/pylot/scripts/run_simulator.sh
+
+Terminal 3:
+
+nvidia-docker exec -i -t pylot sudo service ssh start
+ssh -p 20022 -X erdos@localhost
+cd /home/erdos/workspace/pylot/
+python3 pylot.py --flagfile=configs/detection.conf --visualize_detected_obstacles
