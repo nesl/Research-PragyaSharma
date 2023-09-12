@@ -1,0 +1,3 @@
+[submodule "Distributed_Control/Adaptive_Control_Exps/CARLA/pylot"]
+	path = Distributed_Control/Adaptive_Control_Exps/CARLA/pylot
+	url = https://github.com/erdos-project/pylot/
